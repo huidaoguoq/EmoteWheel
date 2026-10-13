@@ -1,0 +1,20 @@
+# Downloaded third-party artwork; restore with scripts/download_emotes.py.
+/Resources/emotes/
+
+# Build outputs and local IDE files.
+/dist/
+/.build/
+**/bin/
+**/obj/
+.vs/
+.vscode/
+.DS_Store
+*.user
+*.suo
+*.zip
+*.dmg
+*.p12
+*.pfx
+*.mobileprovision
+__pycache__/
+*.py[cod]

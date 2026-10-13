@@ -1,0 +1,69 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download and verify emotes
+        run: python3 scripts/download_emotes.py
+      - name: Run core and focus tests
+        run: bash scripts/test_macos.sh
+      - name: Build
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: bash build.sh
+      - name: Package
+        run: ditto -c -k --sequesterRsrc --keepParent dist/EmoteWheel.app dist/EmoteWheel-macOS-${{ matrix.arch }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmoteWheel-macOS-${{ matrix.arch }}
+          path: dist/EmoteWheel-macOS-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Download and verify emotes
+        run: python scripts/download_emotes.py
+      - name: Run core tests
+        run: dotnet run --project Windows/Tests/CoreTests.csproj -c Release
+      - name: Build
+        run: dotnet publish Windows/EmoteWheel.csproj -c Release -r win-x64 --self-contained true -o dist/EmoteWheel-windows-x64
+      - name: Check bundled catalog and images
+        run: |
+          $process = Start-Process dist/EmoteWheel-windows-x64/EmoteWheel.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "EmoteWheel self-test failed: $($process.ExitCode)" }
+      - name: Package
+        run: Compress-Archive -Path dist/EmoteWheel-windows-x64 -DestinationPath dist/EmoteWheel-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmoteWheel-windows-x64
+          path: dist/EmoteWheel-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
