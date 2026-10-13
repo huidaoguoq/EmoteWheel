@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Fetch the pinned emote assets using only the Python standard library."""
+"""Fetch emotes and verify their pinned file or visible-pixel hashes."""
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
+from io import BytesIO
 import json
 from pathlib import Path
 import sys
@@ -11,24 +12,48 @@ import tempfile
 import time
 from urllib.request import Request, urlopen
 
+from PIL import Image
+
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCES = ROOT / "Resources"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-def matches(path, expected):
-    if not path.is_file():
+def pixel_sha256(data):
+    with Image.open(BytesIO(data)) as image:
+        if image.format != "PNG":
+            raise ValueError("response is not a PNG")
+        rgba = image.convert("RGBA")
+        pixels = bytearray(rgba.tobytes())
+        # CDN PNG optimization may change invisible RGB, but never accept a
+        # change to any visible color, alpha value, or image dimension.
+        for offset in range(0, len(pixels), 4):
+            if pixels[offset + 3] == 0:
+                pixels[offset:offset + 3] = b"\x00\x00\x00"
+        dimensions = rgba.width.to_bytes(4, "big") + rgba.height.to_bytes(4, "big")
+        return hashlib.sha256(dimensions + pixels).hexdigest()
+
+
+def matches_data(data, item):
+    if not data.startswith(PNG_SIGNATURE):
         return False
-    data = path.read_bytes()
-    return data.startswith(PNG_SIGNATURE) and hashlib.sha256(data).hexdigest() == expected
+    if hashlib.sha256(data).hexdigest() == item["sha256"]:
+        return True
+    try:
+        return pixel_sha256(data) == item["pixelSha256"]
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+def matches(path, item):
+    return path.is_file() and matches_data(path.read_bytes(), item)
 
 
 def download(item, destination, verify_only):
-    expected = item["sha256"]
-    if matches(destination, expected):
+    if matches(destination, item):
         return "cached"
     if verify_only:
-        raise ValueError("missing image or SHA-256 mismatch")
+        raise ValueError("missing image or image checksum mismatch")
     for attempt in range(3):
         try:
             request = Request(item["url"], headers={"User-Agent": "EmoteWheel-asset-downloader/1.0"})
@@ -36,8 +61,8 @@ def download(item, destination, verify_only):
                 data = response.read()
             if not data.startswith(PNG_SIGNATURE):
                 raise ValueError("response is not a PNG")
-            if hashlib.sha256(data).hexdigest() != expected:
-                raise ValueError("SHA-256 mismatch; upstream asset may have changed")
+            if not matches_data(data, item):
+                raise ValueError("image checksum mismatch; upstream pixels may have changed")
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary = None
             try:

@@ -11,13 +11,14 @@ case "$EMOTE_ARCH" in
   *) echo "ARCH must be arm64 or x86_64" >&2; exit 1 ;;
 esac
 
-python3 scripts/download_emotes.py --verify-only
 mkdir -p "$EMOTE_APP/Contents/MacOS" "$EMOTE_APP/Contents/Resources" .build/swift-module-cache
 swiftc -O -swift-version 5 -target "$EMOTE_ARCH-apple-macosx13.0" \
   -module-cache-path .build/swift-module-cache \
   -framework AppKit -framework SwiftUI -framework QuartzCore \
   Sources/*.swift -o "$EMOTE_APP/Contents/MacOS/EmoteWheel"
-cp -R Resources/. "$EMOTE_APP/Contents/Resources/"
+rm -rf "$EMOTE_APP/Contents/Resources/emotes"
+cp Resources/*.json Resources/AppIcon.icns "$EMOTE_APP/Contents/Resources/"
+cp -R Resources/starter-emotes "$EMOTE_APP/Contents/Resources/emotes"
 cp Info.plist "$EMOTE_APP/Contents/Info.plist"
 if [[ "$EMOTE_SIGNING" == "-" ]]; then
   codesign --force --sign - --identifier studio.emotewheel.desktop "$EMOTE_APP"

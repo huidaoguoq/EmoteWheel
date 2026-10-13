@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -20,13 +22,22 @@ public sealed class AppModel
     public bool ModalOpen { get; set; }
     public string? LoadWarning { get; private set; }
     public event Action? Changed;
+    public event Action? AssetsChanged;
+    public bool IsDownloading { get; private set; }
+    public int DownloadCompleted { get; private set; }
+    public int DownloadTotal { get; private set; }
+    public int DownloadFailed { get; private set; }
+    public string DownloadStatus { get; private set; } = "内置 8 个表情；下载后可离线使用全部表情。";
+    public int AvailableCount => Catalog.Count(item => available.Contains(item.Id));
+    private readonly HashSet<string> available = new();
+    private CancellationTokenSource? downloadCancellation;
     private readonly Dictionary<string, BitmapSource> cache = new();
     private readonly Queue<string> cacheOrder = new();
 
-    public AppModel()
+    public AppModel(bool loadSettings = true)
     {
         string settings = Path.Combine(SupportPath, "settings.json");
-        if (File.Exists(settings))
+        if (loadSettings && File.Exists(settings))
         {
             try { Config = JsonSerializer.Deserialize<Configuration>(File.ReadAllText(settings), Json) ?? new(); }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -36,28 +47,107 @@ public sealed class AppModel
         string catalogFile = Path.Combine(AppContext.BaseDirectory, "Resources", "emotes.json");
         Catalog.AddRange(JsonSerializer.Deserialize<List<Emote>>(File.ReadAllText(catalogFile), Json) ?? new());
         Catalog.AddRange(Config.CustomEmotes);
+        foreach (var item in Catalog)
+            if (File.Exists(PathFor(item))) available.Add(item.Id);
         for (int index = 0; index < 8; index++)
             if (Find(Config.Slots[index]) == null) Config.Slots[index] = Configuration.DefaultSlots[index];
+        if (AvailableCount == Catalog.Count) DownloadStatus = $"全部 {Catalog.Count:N0} 个表情已可离线使用。";
+        else if (AvailableCount > 8) DownloadStatus = $"已就绪 {AvailableCount:N0} 个表情，可继续下载其余表情。";
     }
 
     public Emote? Find(string id) => Catalog.FirstOrDefault(item => item.Id == id);
-    public string PathFor(Emote item) => Path.Combine(item.Id.StartsWith("custom-", StringComparison.Ordinal) ? SupportPath : Path.Combine(AppContext.BaseDirectory, "Resources"), item.Filename);
+    public string PathFor(Emote item)
+    {
+        if (item.Id.StartsWith("custom-", StringComparison.Ordinal)) return Path.Combine(SupportPath, item.Filename);
+        string downloaded = Path.Combine(SupportPath, "emotes", item.Id + ".png");
+        return File.Exists(downloaded) ? downloaded : BundledPath(item);
+    }
+    private static string BundledPath(Emote item) => Path.Combine(AppContext.BaseDirectory, "Resources", item.Filename);
+    public bool IsAvailable(Emote item) => available.Contains(item.Id);
 
     public BitmapSource? Image(string id)
     {
         if (cache.TryGetValue(id, out var image)) return image;
         var item = Find(id);
         if (item == null) return null;
+        foreach (string path in new[] { PathFor(item), BundledPath(item) }.Distinct())
+        {
+            try
+            {
+                if (!File.Exists(path)) continue;
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.DecodePixelWidth = 256;
+                using var stream = File.OpenRead(path);
+                bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
+                cache[id] = bitmap; cacheOrder.Enqueue(id);
+                while (cache.Count > 128) cache.Remove(cacheOrder.Dequeue());
+                return bitmap;
+            }
+            catch (Exception ex) when (ex is IOException or FileFormatException or UnauthorizedAccessException or NotSupportedException or UriFormatException or ArgumentException or System.Runtime.InteropServices.COMException) { }
+        }
+        available.Remove(id);
+        return null;
+    }
+
+    public void CancelDownload()
+    {
+        if (downloadCancellation == null) return;
+        DownloadStatus = "正在取消下载…";
+        downloadCancellation.Cancel();
+        AssetsChanged?.Invoke();
+    }
+
+    public async Task DownloadAll()
+    {
+        if (IsDownloading) return;
+        IsDownloading = true; DownloadCompleted = 0; DownloadFailed = 0;
+        DownloadTotal = Catalog.Count(item => !item.Id.StartsWith("custom-", StringComparison.Ordinal));
+        DownloadStatus = "正在检查已有表情…";
+        using var cancellation = new CancellationTokenSource();
+        downloadCancellation = cancellation;
+        AssetsChanged?.Invoke();
+        var dispatcher = Application.Current.Dispatcher;
+        var lastUpdate = DateTime.MinValue;
         try
         {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.DecodePixelWidth = 256;
-            bitmap.UriSource = new Uri(PathFor(item)); bitmap.EndInit(); bitmap.Freeze();
-            cache[id] = bitmap; cacheOrder.Enqueue(id);
-            while (cache.Count > 128) cache.Remove(cacheOrder.Dequeue());
-            return bitmap;
+            string folder = Path.Combine(SupportPath, "emotes");
+            Directory.CreateDirectory(folder);
+            var sources = EmoteDownloads.Sources();
+            DownloadTotal = sources.Count;
+            await Parallel.ForEachAsync(sources, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellation.Token }, async (source, token) =>
+            {
+                string id = source.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                string destination = Path.Combine(folder, id + ".png");
+                bool success;
+                try
+                {
+                    if (!EmoteDownloads.ValidImage(destination) && !EmoteDownloads.ValidImage(Path.Combine(AppContext.BaseDirectory, "Resources", "emotes", id + ".png")))
+                        await EmoteDownloads.Download(source, destination, token);
+                    success = true;
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Net.Http.HttpRequestException or OperationCanceledException)
+                { success = false; }
+                await dispatcher.InvokeAsync(() =>
+                {
+                    DownloadCompleted++;
+                    if (success) available.Add(id); else { available.Remove(id); DownloadFailed++; }
+                    DownloadStatus = $"已处理 {DownloadCompleted:N0} / {DownloadTotal:N0} 个 · 失败 {DownloadFailed:N0} 个";
+                    if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds >= 250)
+                    { lastUpdate = DateTime.UtcNow; AssetsChanged?.Invoke(); }
+                });
+            });
+            DownloadStatus = DownloadFailed == 0 ? $"全部 {DownloadTotal:N0} 个表情已可离线使用。" : $"下载完成，{DownloadFailed:N0} 个失败；点击重试会保留已下载的表情。";
         }
-        catch (Exception ex) when (ex is IOException or NotSupportedException or UriFormatException or System.Runtime.InteropServices.COMException) { return null; }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        { DownloadStatus = $"已取消，保留已下载的表情；可随时继续下载。"; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or ArgumentException)
+        { DownloadStatus = "下载失败：" + ex.Message; }
+        finally
+        {
+            downloadCancellation = null; IsDownloading = false;
+            AssetsChanged?.Invoke(); Changed?.Invoke();
+        }
     }
 
     public void Save()
@@ -75,7 +165,7 @@ public sealed class AppModel
         Changed?.Invoke();
     }
 
-    public void Assign(Emote emote) { Config.Slots[SelectedSlot] = emote.Id; Save(); }
+    public void Assign(Emote emote) { if (Image(emote.Id) == null) return; Config.Slots[SelectedSlot] = emote.Id; Save(); }
     public void SetRecording(bool value) { RecordingKey = value; Changed?.Invoke(); }
 
     public void Import(string path)
@@ -94,7 +184,7 @@ public sealed class AppModel
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(normalized));
         using (var stream = File.Create(Path.Combine(SupportPath, filename))) encoder.Save(stream);
         var item = new Emote { Id = id, Name = Path.GetFileNameWithoutExtension(path), Subtitle = "我的表情", Filename = filename };
-        Catalog.Add(item); Config.CustomEmotes.Add(item); Assign(item);
+        Catalog.Add(item); Config.CustomEmotes.Add(item); available.Add(id); Assign(item);
     }
 
     public void Reset()

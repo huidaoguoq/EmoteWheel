@@ -11,13 +11,14 @@
     <ApplicationIcon>AppIcon.ico</ApplicationIcon>
     <AssemblyName>EmoteWheel</AssemblyName>
     <RootNamespace>EmoteWheel</RootNamespace>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <DebugType>none</DebugType>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="Tests/**/*.cs" />
     <Content Include="../Resources/emotes.json" Link="Resources/emotes.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="../Resources/emotes/*.png" Link="Resources/emotes/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Resources/starter-emotes/*.png" Link="Resources/emotes/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Resources/emotes-sources.json" Link="Resources/emotes-sources.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../SOURCES.md" Link="SOURCES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

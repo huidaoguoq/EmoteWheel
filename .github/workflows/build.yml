@@ -21,8 +21,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Download and verify emotes
-        run: python3 scripts/download_emotes.py
+      - name: Install asset tooling and test downloader
+        run: |
+          python3 -m pip install -r scripts/requirements.txt
+          python3 -m unittest discover -s scripts/tests
       - name: Run core and focus tests
         run: bash scripts/test_macos.sh
       - name: Build
@@ -49,8 +51,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Download and verify emotes
-        run: python scripts/download_emotes.py
+      - name: Install asset tooling and test downloader
+        run: |
+          python -m pip install -r scripts/requirements.txt
+          python -m unittest discover -s scripts/tests
       - name: Run core tests
         run: dotnet run --project Windows/Tests/CoreTests.csproj -c Release
       - name: Build

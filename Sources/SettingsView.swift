@@ -464,6 +464,8 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
             }
 
+            downloadPanel
+
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
@@ -512,8 +514,51 @@ struct SettingsView: View {
         }
     }
 
+    private var downloadPanel: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("已就绪 \(model.readyEmoteCount) / \(model.standardEmoteCount) 个表情" +
+                         (model.downloadFailures > 0 ? " · 失败 \(model.downloadFailures) 个" : ""))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.text)
+                    Text(model.downloadStatus.isEmpty ? "内置 8 个常用表情，下载完整图库后可离线使用。" : model.downloadStatus)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if model.isDownloading {
+                    Button("取消下载") { model.cancelDownload() }
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.gold)
+                } else {
+                    Button { model.downloadAllEmotes() } label: {
+                        Label(model.downloadFailures > 0 ? "重试下载" : "一键下载全部", systemImage: "arrow.down.circle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.background)
+                            .padding(.horizontal, 12)
+                            .frame(height: 29)
+                            .background(Theme.gold, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!model.downloadAllowed)
+                }
+            }
+            if model.isDownloading {
+                ProgressView(value: Double(model.readyEmoteCount), total: Double(max(model.standardEmoteCount, 1)))
+                    .progressViewStyle(.linear)
+                    .tint(Theme.gold)
+            }
+        }
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line, lineWidth: 1))
+    }
+
     private func libraryTile(_ emote: Emote) -> some View {
         let selected = emote.id == selectedEmoteID
+        let available = model.availableEmoteIDs.contains(emote.id)
         return Button { model.assign(emote) } label: {
             VStack(spacing: 4) {
                 emoteImage(emote.id, size: 48)
@@ -541,8 +586,10 @@ struct SettingsView: View {
             .contentShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(ThemeLibraryButtonStyle())
-        .help(emote.subtitle.isEmpty ? emote.name : "\(emote.name) · \(emote.subtitle)")
-        .accessibilityLabel("将\(emote.name)装备到位置\(model.selectedSlot + 1)")
+        .disabled(!available)
+        .opacity(available ? 1 : 0.55)
+        .help(available ? (emote.subtitle.isEmpty ? emote.name : "\(emote.name) · \(emote.subtitle)") : "\(emote.name) · 尚未下载，点击上方一键下载全部")
+        .accessibilityLabel(available ? "将\(emote.name)装备到位置\(model.selectedSlot + 1)" : "\(emote.name)，尚未下载")
     }
 
     @ViewBuilder
@@ -554,7 +601,7 @@ struct SettingsView: View {
                 .scaledToFit()
                 .frame(width: size, height: size)
         } else {
-            Image(systemName: "face.smiling")
+            Image(systemName: "arrow.down.circle")
                 .font(.system(size: size * 0.6, weight: .ultraLight))
                 .foregroundStyle(Theme.gold.opacity(0.45))
                 .frame(width: size, height: size)

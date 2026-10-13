@@ -22,8 +22,47 @@ struct NativeSmokeTests {
         func up(_ key: UInt16 = 16) {
             keyboard.handle(type: .keyUp, keyCode: key, flags: [], isRepeat: false)
         }
-        check(model.catalog.count == 2400, "complete offline catalog must load")
-        check(model.catalog.allSatisfy { model.image(for: $0.id) != nil }, "every bundled image must decode")
+        check(model.catalog.count == 2400, "complete catalog metadata must load without downloading")
+        check(Configuration().slots.allSatisfy { model.image(for: $0) != nil }, "all eight starter images must decode")
+        check(!model.downloadAllowed, "preview must disable network downloads")
+        model.downloadAllEmotes()
+        check(!model.isDownloading, "preview cannot start a background download")
+        let temporarySupport = FileManager.default.temporaryDirectory.appendingPathComponent("EmoteWheel-AssetTests-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: temporarySupport) }
+        do {
+            let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 3, pixelsHigh: 2,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            let png = bitmap.representation(using: .png, properties: [:])!
+            let cachedURL = temporarySupport.appendingPathComponent("emotes/1505.png")
+            try EmoteDownloads.savePNG(png, to: cachedURL)
+            check(NSImage(contentsOf: cachedURL)?.size == NSSize(width: 3, height: 2), "downloaded PNG is saved as a readable cache image")
+            do {
+                try EmoteDownloads.savePNG(Data("not an image".utf8), to: cachedURL)
+                check(false, "invalid download must be rejected")
+            } catch {
+                check((try? Data(contentsOf: cachedURL)) == png, "invalid download must preserve a previously cached image")
+            }
+            var saved = Configuration()
+            saved.slots[0] = "997"
+            let custom = Emote(id: "custom-cache-test", name: "Custom", subtitle: "", filename: "imports/custom.png")
+            saved.customEmotes = [custom]
+            try EmoteDownloads.savePNG(png, to: temporarySupport.appendingPathComponent(custom.filename))
+            try JSONEncoder().encode(saved).write(to: temporarySupport.appendingPathComponent("settings.json"))
+            let cachedModel = AppModel(supportDirectory: temporarySupport)
+            check(cachedModel.config.slots[0] == "997", "saved catalog selections survive missing local images")
+            let unavailable = Emote(id: "unavailable-fixture", name: "Missing", subtitle: "", filename: "emotes/missing.png")
+            cachedModel.catalog.append(unavailable)
+            cachedModel.assign(unavailable)
+            check(cachedModel.config.slots[0] == "997", "unavailable image cannot replace an equipped emote")
+            check(cachedModel.image(for: "1505")?.size == NSSize(width: 3, height: 2), "persistent cache takes precedence over bundled image")
+            check(cachedModel.image(for: custom.id) != nil, "custom imports resolve from the support directory")
+            check(cachedModel.availableEmoteIDs.contains("1505") && cachedModel.availableEmoteIDs.contains(custom.id), "cached and custom images are available immediately")
+            let restored = AppModel(supportDirectory: temporarySupport)
+            check(restored.image(for: "1505")?.size == NSSize(width: 3, height: 2), "cached downloads survive app model recreation")
+        } catch {
+            check(false, "cache fixture failed: \(error)")
+        }
         down(); check(overlay.active, "Y down opens wheel")
         let wheel = app.windows.first { $0 is OverlayPanel && $0.isVisible }
         check(wheel?.level == .screenSaver, "wheel stays above normal windows")

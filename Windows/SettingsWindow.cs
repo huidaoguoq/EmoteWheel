@@ -14,7 +14,9 @@ internal sealed class SettingsWindow : Window
     private readonly AppModel model;
     private readonly OverlayController overlay;
     private readonly TextBlock shortcut = new(), status = new(), count = new(), pageLabel = new();
-    private readonly Button record = new();
+    private readonly Button record = new(), download = new(), cancelDownload = new();
+    private readonly TextBlock downloadStatus = new();
+    private readonly ProgressBar downloadProgress = new() { Height = 4, Margin = new Thickness(0, 8, 0, 0) };
     private readonly CheckBox enabled = new() { Content = "启用全局快捷键", VerticalAlignment = VerticalAlignment.Center };
     private readonly UniformGrid slots = new() { Columns = 8 };
     private readonly UniformGrid library = new() { Columns = 8 };
@@ -41,7 +43,7 @@ internal sealed class SettingsWindow : Window
         FontFamily = new FontFamily("Microsoft YaHei UI"); FontSize = 13;
         Resources[typeof(Button)] = ButtonStyle();
         var layout = new Grid { Margin = new Thickness(30, 23, 30, 18) };
-        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
+        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
             layout.RowDefinitions.Add(new RowDefinition { Height = height });
         Content = layout;
 
@@ -89,7 +91,19 @@ internal sealed class SettingsWindow : Window
         searchGroup.Children.Add(search); searchGroup.Children.Add(Button("清空", () => search.Clear()));
         searchRow.Children.Add(searchGroup); Add(layout, searchRow, 3);
 
-        libraryScroll.Content = library; Add(layout, libraryScroll, 4);
+        var downloads = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+        var downloadRow = new DockPanel();
+        var downloadButtons = new StackPanel { Orientation = Orientation.Horizontal };
+        DockPanel.SetDock(downloadButtons, Dock.Right);
+        download.Click += async (_, _) => await model.DownloadAll();
+        cancelDownload.Content = "取消"; cancelDownload.Click += (_, _) => model.CancelDownload();
+        downloadButtons.Children.Add(download); downloadButtons.Children.Add(cancelDownload);
+        downloadRow.Children.Add(downloadButtons);
+        downloadStatus.Foreground = Muted; downloadStatus.VerticalAlignment = VerticalAlignment.Center;
+        downloadStatus.TextWrapping = TextWrapping.Wrap; downloadRow.Children.Add(downloadStatus);
+        downloads.Children.Add(downloadRow); downloads.Children.Add(downloadProgress); Add(layout, downloads, 4);
+
+        libraryScroll.Content = library; Add(layout, libraryScroll, 5);
         var footer = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         var pagination = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(pagination, Dock.Right);
         previous.Content = "上一页"; previous.Click += (_, _) => { page--; RefreshLibrary(); };
@@ -97,12 +111,13 @@ internal sealed class SettingsWindow : Window
         pageLabel.VerticalAlignment = VerticalAlignment.Center; pageLabel.Margin = new Thickness(8, 0, 14, 0);
         pagination.Children.Add(previous); pagination.Children.Add(pageLabel); pagination.Children.Add(next); footer.Children.Add(pagination);
         status.Foreground = Muted; status.FontSize = 11; status.TextWrapping = TextWrapping.Wrap; status.VerticalAlignment = VerticalAlignment.Center;
-        footer.Children.Add(status); Add(layout, footer, 5);
+        footer.Children.Add(status); Add(layout, footer, 6);
 
         model.Changed += Refresh;
+        model.AssetsChanged += () => { Refresh(); RefreshDownload(); RefreshLibrary(false); };
         Closing += (_, args) => { if (!Exiting) { args.Cancel = true; model.SetRecording(false); Hide(); } };
         Deactivated += (_, _) => { if (model.RecordingKey) model.SetRecording(false); };
-        Refresh(); RefreshLibrary();
+        Refresh(); RefreshDownload(); RefreshLibrary();
         if (model.LoadWarning != null) status.Text = model.LoadWarning;
     }
 
@@ -137,7 +152,8 @@ internal sealed class SettingsWindow : Window
             int slot = index;
             var item = model.Find(model.Config.Slots[index]);
             var content = new StackPanel();
-            content.Children.Add(new Image { Source = model.Image(model.Config.Slots[index]), Width = 52, Height = 52 });
+            var slotImage = model.Image(model.Config.Slots[index]);
+            content.Children.Add(slotImage == null ? Placeholder(52) : new Image { Source = slotImage, Width = 52, Height = 52 });
             content.Children.Add(new TextBlock { Text = positions[index], FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) });
             var button = new Button { Content = content, Padding = new Thickness(3, 7, 3, 7), ToolTip = item?.Name,
                 BorderBrush = index == model.SelectedSlot ? Gold : Color("#294252"), BorderThickness = new Thickness(index == model.SelectedSlot ? 2 : 1) };
@@ -148,24 +164,38 @@ internal sealed class SettingsWindow : Window
         refreshing = false;
     }
 
-    private void RefreshLibrary()
+    private static FrameworkElement Placeholder(double size) => new Border { Width = size, Height = size, Background = Card,
+        Child = new TextBlock { Text = "未下载", Foreground = Muted, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
+
+    private void RefreshDownload()
+    {
+        downloadStatus.Text = model.DownloadStatus;
+        download.Content = model.IsDownloading ? "正在下载…" : model.DownloadFailed > 0 ? "重试下载全部表情" : "一键下载全部表情";
+        download.IsEnabled = !model.IsDownloading;
+        cancelDownload.Visibility = model.IsDownloading ? Visibility.Visible : Visibility.Collapsed;
+        downloadProgress.Visibility = model.IsDownloading ? Visibility.Visible : Visibility.Collapsed;
+        downloadProgress.Maximum = Math.Max(1, model.DownloadTotal); downloadProgress.Value = model.DownloadCompleted;
+    }
+
+    private void RefreshLibrary(bool resetScroll = true)
     {
         string query = search.Text.Trim();
         filtered = string.IsNullOrEmpty(query) ? model.Catalog : model.Catalog.Where(item => item.Matches(query)).ToList();
         int pages = Math.Max(1, (filtered.Count + PageSize - 1) / PageSize); page = Math.Clamp(page, 0, pages - 1);
-        count.Text = query.Length == 0 ? $"全部 {filtered.Count:N0} 个" : $"找到 {filtered.Count:N0} 个";
         pageLabel.Text = $"{page + 1} / {pages}"; previous.IsEnabled = page > 0; next.IsEnabled = page + 1 < pages;
         library.Children.Clear();
         foreach (var item in filtered.Skip(page * PageSize).Take(PageSize))
         {
             var content = new StackPanel();
-            content.Children.Add(new Image { Source = model.Image(item.Id), Width = 67, Height = 67 });
+            var image = model.Image(item.Id);
+            content.Children.Add(image == null ? Placeholder(67) : new Image { Source = image, Width = 67, Height = 67 });
             content.Children.Add(new TextBlock { Text = item.Name, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 100, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 5, 0, 0) });
-            var button = new Button { Content = content, Padding = new Thickness(2, 7, 2, 7), Margin = new Thickness(0, 0, 7, 7), ToolTip = $"{item.Name}\n{item.Subtitle}\nID: {item.Id}" };
+            var button = new Button { Content = content, IsEnabled = image != null, Padding = new Thickness(2, 7, 2, 7), Margin = new Thickness(0, 0, 7, 7), ToolTip = $"{item.Name}\n{item.Subtitle}\nID: {item.Id}" };
             button.Click += (_, _) => model.Assign(item); library.Children.Add(button);
         }
+        count.Text = $"可用 {model.AvailableCount:N0} / {model.Catalog.Count:N0} 个" + (query.Length == 0 ? "" : $" · 找到 {filtered.Count:N0} 个");
         if (filtered.Count == 0) status.Text = "没有匹配表情，试试英文名称、别名或 ID。";
-        libraryScroll.ScrollToTop();
+        if (resetScroll) libraryScroll.ScrollToTop();
     }
 
     private void Import()
