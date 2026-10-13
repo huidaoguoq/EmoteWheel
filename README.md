@@ -20,15 +20,17 @@
 
 ## 下载与运行
 
-可在本仓库 **Actions → Build → 成功的工作流运行 → Artifacts** 下载对应平台的压缩包。自动构建只产生下载文件，不会自动发布 Release。
+打开 **[最新版本下载页](https://github.com/huidaoguoq/EmoteWheel/releases/latest)**，或点击下面对应系统的下载链接。下载的是可以直接运行的应用压缩包，无需自行编译。
 
-| 平台 | 要求 | 运行方式 |
+| 平台 | 直接下载 | 要求与运行方式 |
 | --- | --- | --- |
-| macOS Apple Silicon | macOS 13 或更新版本 | 解压 `EmoteWheel-macOS-arm64.zip`，将 `EmoteWheel.app` 放入“应用程序”后打开 |
-| macOS Intel | macOS 13 或更新版本 | 使用 `EmoteWheel-macOS-x86_64.zip` |
-| Windows x64 | Windows 10 / 11 | 解压整个 `EmoteWheel-windows-x64.zip`，打开其中的 `EmoteWheel.exe`；请保留同目录所有文件 |
+| Windows x64 | [下载 Windows 版](https://github.com/huidaoguoq/EmoteWheel/releases/latest/download/EmoteWheel-windows-x64.zip) | Windows 10 / 11；解压整个 ZIP，打开其中的 `EmoteWheel.exe`，请保留同目录所有文件 |
+| macOS Apple Silicon（M 系列芯片） | [下载 macOS arm64 版](https://github.com/huidaoguoq/EmoteWheel/releases/latest/download/EmoteWheel-macOS-arm64.zip) | macOS 13 或更新版本；解压后将 `EmoteWheel.app` 放入“应用程序”再打开 |
+| macOS Intel | [下载 macOS x86_64 版](https://github.com/huidaoguoq/EmoteWheel/releases/latest/download/EmoteWheel-macOS-x86_64.zip) | macOS 13 或更新版本；解压后将 `EmoteWheel.app` 放入“应用程序”再打开 |
 
 Windows 包包含 .NET 运行时，用户无需另装 .NET。Windows 版目前未完成 Windows 实机交互验收；构建成功不能替代实际多屏、输入法及其他应用兼容性测试。
+
+开发版本也可在 **[Actions](https://github.com/huidaoguoq/EmoteWheel/actions) → Build → 成功的工作流运行 → Artifacts** 下载。CI 自动构建只生成这些文件，不会自动发布 Release。
 
 ### 下载完整图库
 
