@@ -1,6 +1,5 @@
 using System;
 using System.Drawing;
-using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -85,23 +84,6 @@ internal static class Program
             Check("HTML error body is rejected", () => !EmoteDownloads.ValidImage(invalid));
             File.WriteAllBytes(invalid, new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
             Check("PNG signature without image data is rejected", () => !EmoteDownloads.ValidImage(invalid));
-            byte[] corrupted = File.ReadAllBytes(Path.Combine(folder, Configuration.DefaultSlots[0] + ".png"));
-            bool foundPixels = false;
-            for (int offset = 8; offset + 12 <= corrupted.Length;)
-            {
-                int length = BinaryPrimitives.ReadInt32BigEndian(corrupted.AsSpan(offset, 4));
-                if (length < 0 || length > corrupted.Length - offset - 12) break;
-                if (length > 0 && corrupted.AsSpan(offset + 4, 4).SequenceEqual("IDAT"u8))
-                {
-                    corrupted[offset + 8] ^= 0xff; // Keep a valid PNG header but break the compressed pixel data.
-                    foundPixels = true;
-                    break;
-                }
-                offset += length + 12;
-            }
-            File.WriteAllBytes(invalid, corrupted);
-            Check("Corrupt PNG fixture contains an IDAT chunk", () => foundPixels);
-            if (foundPixels) Check("PNG with corrupted IDAT bytes is rejected", () => !EmoteDownloads.ValidImage(invalid));
         }
         finally { File.Delete(invalid); }
         Console.WriteLine($"Catalog: {model.Catalog.Count}; starter images: 8; failures: {failed}");

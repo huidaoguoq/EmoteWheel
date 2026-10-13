@@ -126,7 +126,7 @@ public sealed class AppModel
                     success = true;
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Net.Http.HttpRequestException or OperationCanceledException)
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Net.Http.HttpRequestException or OperationCanceledException)
                 { success = false; }
                 await dispatcher.InvokeAsync(() =>
                 {

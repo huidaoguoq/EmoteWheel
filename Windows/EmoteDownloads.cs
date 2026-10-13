@@ -38,7 +38,7 @@ internal static class EmoteDownloads
             Validate(stream);
             return true;
         }
-        catch (Exception ex) when (ex is IOException or FileFormatException or UnauthorizedAccessException or NotSupportedException or ArgumentException or System.Runtime.InteropServices.COMException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or FileFormatException or UnauthorizedAccessException or NotSupportedException or ArgumentException or System.Runtime.InteropServices.COMException)
         { return false; }
     }
 
@@ -78,7 +78,7 @@ internal static class EmoteDownloads
                 return;
             }
             catch (Exception ex) when (!cancellation.IsCancellationRequested && attempt < 2 &&
-                ex is HttpRequestException or IOException or OperationCanceledException)
+                ex is HttpRequestException or IOException or InvalidDataException or OperationCanceledException)
             { await Task.Delay(500 * (attempt + 1), cancellation).ConfigureAwait(false); }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
