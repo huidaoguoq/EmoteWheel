@@ -18,7 +18,7 @@ internal static class Program
         if (args.Contains("--self-test", StringComparer.Ordinal))
         {
             try { return SelfTest(new AppModel(loadSettings: false)); }
-            catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+            catch (Exception ex) { Console.Error.WriteLine("Self-test exception: " + ex); return 1; }
         }
         using var instance = new Mutex(true, "Local\\EmoteWheel.Desktop", out bool first);
         if (!first) { MessageBox.Show("EmoteWheel 已在运行，请双击任务栏右下角的托盘图标打开设置。", "EmoteWheel"); return 0; }
@@ -58,22 +58,33 @@ internal static class Program
     private static int SelfTest(AppModel model)
     {
         int failed = 0;
-        if (model.Catalog.Count != 2400 || model.Catalog.Select(item => item.Id).Distinct().Count() != 2400) failed++;
+        void Check(string name, Func<bool> condition)
+        {
+            try
+            {
+                if (condition()) { Console.WriteLine("PASS: " + name); return; }
+                Console.Error.WriteLine("FAIL: " + name);
+            }
+            catch (Exception ex) { Console.Error.WriteLine("FAIL: " + name + " threw " + ex); }
+            failed++;
+        }
+        Check($"Catalog count is 2400 (actual {model.Catalog.Count})", () => model.Catalog.Count == 2400);
+        Check("Catalog has 2400 unique IDs", () => model.Catalog.Select(item => item.Id).Distinct().Count() == 2400);
         var sources = EmoteDownloads.Sources();
-        if (sources.Count != 2400 || sources.Select(item => item.Id).Distinct().Count() != 2400 ||
-            sources.Any(item => model.Find(item.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)) == null)) failed++;
+        Check($"Download source count is 2400 (actual {sources.Count})", () => sources.Count == 2400);
+        Check("Download sources have 2400 unique IDs", () => sources.Select(item => item.Id).Distinct().Count() == 2400);
+        Check("Every download source ID exists in the catalog", () => sources.All(item => model.Find(item.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)) != null));
         string folder = Path.Combine(AppContext.BaseDirectory, "Resources", "emotes");
-        if (Directory.GetFiles(folder, "*.png").Length != 8) failed++;
+        Check("Published Resources/emotes contains exactly 8 PNG files", () => Directory.GetFiles(folder, "*.png").Length == 8);
         foreach (string id in Configuration.DefaultSlots)
-            if (!EmoteDownloads.ValidImage(Path.Combine(folder, id + ".png")))
-            { Console.Error.WriteLine("无法加载内置表情：" + id); failed++; }
+            Check("Bundled PNG decodes: " + id, () => EmoteDownloads.ValidImage(Path.Combine(folder, id + ".png")));
         string invalid = Path.GetTempFileName();
         try
         {
             File.WriteAllText(invalid, "<html>Server error</html>");
-            if (EmoteDownloads.ValidImage(invalid)) failed++;
+            Check("HTML error body is rejected", () => !EmoteDownloads.ValidImage(invalid));
             File.WriteAllBytes(invalid, new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
-            if (EmoteDownloads.ValidImage(invalid)) failed++;
+            Check("PNG signature without image data is rejected", () => !EmoteDownloads.ValidImage(invalid));
             byte[] corrupted = File.ReadAllBytes(Path.Combine(folder, Configuration.DefaultSlots[0] + ".png"));
             bool foundPixels = false;
             for (int offset = 8; offset + 12 <= corrupted.Length;)
@@ -89,7 +100,8 @@ internal static class Program
                 offset += length + 12;
             }
             File.WriteAllBytes(invalid, corrupted);
-            if (!foundPixels || EmoteDownloads.ValidImage(invalid)) failed++;
+            Check("Corrupt PNG fixture contains an IDAT chunk", () => foundPixels);
+            if (foundPixels) Check("PNG with corrupted IDAT bytes is rejected", () => !EmoteDownloads.ValidImage(invalid));
         }
         finally { File.Delete(invalid); }
         Console.WriteLine($"Catalog: {model.Catalog.Count}; starter images: 8; failures: {failed}");

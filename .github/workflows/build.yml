@@ -61,7 +61,8 @@ jobs:
         run: dotnet publish Windows/EmoteWheel.csproj -c Release -r win-x64 --self-contained true -o dist/EmoteWheel-windows-x64
       - name: Check bundled catalog and images
         run: |
-          $process = Start-Process dist/EmoteWheel-windows-x64/EmoteWheel.exe -ArgumentList '--self-test' -Wait -PassThru
+          $process = Start-Process dist/EmoteWheel-windows-x64/EmoteWheel.exe -ArgumentList '--self-test' -Wait -PassThru -RedirectStandardOutput self-test.log -RedirectStandardError self-test-error.log
+          Get-Content self-test.log, self-test-error.log
           if ($process.ExitCode -ne 0) { throw "EmoteWheel self-test failed: $($process.ExitCode)" }
       - name: Package
         run: Compress-Archive -Path dist/EmoteWheel-windows-x64 -DestinationPath dist/EmoteWheel-windows-x64.zip
